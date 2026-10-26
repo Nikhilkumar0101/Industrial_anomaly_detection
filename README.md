@@ -1,101 +1,79 @@
-# Industrial Anomaly Detection — College Project
+# Industrial Anomaly Detection
 
-A practical visual-inspection demo that learns normal product appearance and flags unusual regions in new images. It is designed for Google Colab and a one-day college project.
+A visual inspection system that learns the appearance of normal products from defect-free images and flags anomalous regions in new samples. Built on a PatchCore-inspired approach, this project provides a complete pipeline for training, evaluation, and interactive demo.
 
-## Real-world use case
+## Overview
 
-A manufacturing camera captures each product. The system compares the image with defect-free examples and returns:
-- an image-level anomaly score,
-- a heatmap of suspicious regions,
-- an overlay for human review.
+In manufacturing quality control, automated visual inspection can help detect surface defects such as scratches, dents, stains, or cracks. This project tackles the problem with **one-class classification**: the model learns what a normal product looks like using only defect-free training images. At test time, it identifies regions that deviate from the learned normal appearance.
 
-Potential applications include surface inspection of bottles, tiles, metal components, and similar products. This is a research prototype, not a certified factory inspection system.
+### Key features
 
-## Method
+- **Anomaly scoring** — each image receives a numerical score indicating how anomalous it is.
+- **Pixel-level heatmaps** — the model highlights specific regions that contribute to the anomaly score.
+- **Interactive web demo** — a Gradio-based interface for uploading images and inspecting results.
+- **Standard metrics** — reports image-level and pixel-level AUROC on benchmark datasets (e.g. MVTec AD).
 
-This repository implements a **PatchCore-inspired** method:
-1. A pretrained ResNet18 extracts features at two intermediate layers.
-2. Feature vectors from defect-free training images form a memory bank.
-3. At inference, each test-image patch is compared with its nearest normal feature.
-4. Large nearest-neighbour distances produce a higher anomaly score and heatmap.
+## How it works
 
-This is a lightweight educational implementation, **not the official PatchCore implementation**. Its scores and metrics may differ from published PatchCore results.
+This project implements a **PatchCore-inspired** method:
+
+1. **Feature extraction** — A pretrained ResNet18 extracts convolutional feature maps at two intermediate layers (layer2 and layer3) from each training image. These features encode local visual patterns at multiple scales.
+2. **Memory bank** — The patch-level feature vectors from all defect-free training images are collected, and a random representative subset is stored as a memory bank. This bank serves as the reference for "normal" appearance.
+3. **Nearest-neighbour scoring** — At inference, each patch of a test image is compared (via Euclidean distance in feature space) to its nearest neighbour in the memory bank. Patches that look unlike any normal training patch receive a high distance score.
+4. **Anomaly map** — The per-patch distances are upsampled to the original image resolution, producing a continuous heatmap. The score for the entire image is the average of the top 1% of heatmap values.
+
+> This is a lightweight educational implementation inspired by the PatchCore paper. It is not the official PatchCore implementation, and its scores/metrics may differ from published results.
 
 ## Dataset
 
-Use the official MVTec AD dataset:
-https://www.mvtec.com/research-teaching/datasets/mvtec-ad
+The system is designed for use with the **MVTec AD** dataset, a benchmark for anomaly detection in industrial images:
 
-Download it from the official page and review the license before use. It is intended for non-commercial research use under its published license; do not use or redistribute it commercially without permission.
+- [MVTec AD](https://www.mvtec.com/research-teaching/datasets/mvtec-ad)
 
-Start with one category, such as `bottle`. The expected structure is:
+The dataset is intended for non-commercial research use under its published license. Download it from the official page and review the license before use.
+
+Start with one category (e.g. `bottle`). The expected directory structure is:
 
 ```text
 data/mvtec_anomaly_detection/
 └── bottle/
     ├── train/
-    │   └── good/
+    │   └── good/          ← defect-free training images
     ├── test/
-    │   ├── good/
-    │   └── <defect_type>/
+    │   ├── good/          ← normal test images
+    │   └── <defect_type>/ ← defective test images (e.g. broken_large, contamination)
     └── ground_truth/
-        └── <defect_type>/
+        └── <defect_type>/ ← pixel-level mask images
 ```
 
-The dataset archive may extract into an extra nested directory. Set `--data-root` to the directory containing the category folder. The code attempts to recognize common nested layouts.
+The dataset archive may extract into an extra nested directory. Use `--data-root` to point to the directory containing the category folder; the code recognises common nested layouts.
 
-## Option A — Run in Google Colab (recommended)
+## Quick start
 
-1. Upload `industrial_anomaly_detection_project.zip` to Colab, or upload it to Google Drive and mount Drive.
-2. Extract the ZIP:
+### Requirements
 
-```python
-!unzip -q industrial_anomaly_detection_project.zip -d /content/
-%cd /content/industrial_anomaly_detection_project
+- Python 3.10 or 3.11 recommended
+- PyTorch (see [pytorch.org](https://pytorch.org/) for platform-specific installation)
+- See `requirements.txt` for additional packages
+
+### 1. Install dependencies
+
+```bash
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS / Linux:
+source .venv/bin/activate
+
+pip install -r requirements.txt
 ```
 
-If you uploaded/extracted it under a different path, change `%cd` to the actual folder.
+### 2. Train
 
-3. Install requirements:
+Train the model on normal images of a single category:
 
-```python
-!pip install -r requirements.txt
-```
-
-4. Check whether a GPU is available:
-
-```python
-import torch
-print("CUDA available:", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print(torch.cuda.get_device_name(0))
-```
-
-In Colab, choose **Runtime → Change runtime type → T4 GPU** if one is available. A GPU is recommended, but availability varies.
-
-5. Download the official MVTec AD archive from the dataset page. Upload the extracted dataset into the Colab session or Drive. For example, the project expects the category at:
-
-```text
-/content/industrial_anomaly_detection_project/data/mvtec_anomaly_detection/bottle/
-```
-
-You can also leave the dataset in Drive and pass that directory to `--data-root`.
-
-6. Verify the dataset path:
-
-```python
-from pathlib import Path
-root = Path("data/mvtec_anomaly_detection")
-print("Root exists:", root.exists())
-print("Bottle train folder exists:", (root / "bottle" / "train" / "good").exists())
-print("Number of normal training images:",
-      len(list((root / "bottle" / "train" / "good").glob("*"))))
-```
-
-7. Train the model on normal images only:
-
-```python
-!python train.py \
+```bash
+python train.py \
   --data-root data/mvtec_anomaly_detection \
   --category bottle \
   --image-size 256 \
@@ -104,124 +82,72 @@ print("Number of normal training images:",
   --output outputs/model.pt
 ```
 
-The first run downloads pretrained ImageNet ResNet18 weights. Keep the runtime connected until training completes. If GPU memory is limited, lower `--batch-size` to `8`; if training is too slow, lower `--image-size` to `224` or `192`.
+The first run downloads pretrained ResNet18 weights from ImageNet. If GPU memory is limited, reduce `--batch-size` to 8 or `--image-size` to 224.
 
-8. Evaluate on the MVTec test split:
+### 3. Evaluate
 
-```python
-!python evaluate.py \
+Run evaluation on the MVTec test split:
+
+```bash
+python evaluate.py \
   --data-root data/mvtec_anomaly_detection \
   --category bottle \
   --model outputs/model.pt \
   --output-csv outputs/evaluation.csv
 ```
 
-The script reports image-level AUROC and pixel-level AUROC when labels/masks permit, and saves per-image scores to `outputs/evaluation.csv`. These metrics are for a quick prototype; the pixel AUROC uses resized masks and should be reported with that limitation.
+The script reports image-level AUROC and pixel-level AUROC (when ground-truth masks are available) and saves per-image scores to a CSV.
 
-9. Launch the web demo:
-
-```python
-!python app.py --model outputs/model.pt --share
-```
-
-Open the temporary Gradio link shown in the output. Upload normal and defective test images. The UI displays the original/heatmap overlay, heatmap, and anomaly score.
-
-10. Keep the notebook/runtime active while using a temporary Gradio share link. Do not upload confidential factory images to a public demo link.
-
-## Option B — Run locally
-
-Python 3.10 or 3.11 is recommended.
+### 4. Launch the web interface
 
 ```bash
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
-
-pip install -r requirements.txt
-python train.py --data-root data/mvtec_anomaly_detection --category bottle
-python evaluate.py --data-root data/mvtec_anomaly_detection --category bottle
 python app.py --model outputs/model.pt
 ```
 
-On Windows, run the activation command appropriate to your terminal. For a local demo, omit `--share`.
+Open the local Gradio link in a browser. Upload normal and defective test images to see:
+- The original image overlaid with the anomaly heatmap
+- The raw heatmap
+- The anomaly score and inspection decision
 
-## Project layout
+Add `--share` to create a temporary public link for sharing the demo.
+
+## Project structure
 
 ```text
 industrial_anomaly_detection_project/
-├── app.py              # Gradio upload demo
-├── train.py            # builds the normal feature memory bank
+├── app.py              # Gradio web demo
+├── train.py            # builds the normal-feature memory bank
 ├── evaluate.py         # test metrics and per-image scores
 ├── requirements.txt
 ├── README.md
 ├── src/
-│   ├── data.py         # dataset paths and image transforms
-│   └── model.py        # feature extraction, memory bank, anomaly maps
-├── data/               # put the dataset here (not included)
-└── outputs/             # model and evaluation output (created at runtime)
+│   ├── data.py         # dataset paths, image transforms, helpers
+│   └── model.py        # feature extraction, memory bank, anomaly scoring
+├── data/               # place the dataset here (not committed)
+└── outputs/            # model checkpoints and evaluation results (created at runtime)
 ```
 
-## Troubleshooting
+## Configuration tips
 
-### `Could not find the normal training folder`
-Check the directory path. It must contain `bottle/train/good` (or the selected category's `train/good`). Use:
+| Parameter | Default | Notes |
+|-----------|---------|-------|
+| `--image-size` | 256 | Lower to 224 or 192 if GPU memory is limited or training is slow |
+| `--batch-size` | 16 | Reduce to 8 or 4 for low-memory GPUs |
+| `--max-memory-patches` | 12000 | Larger = more representative memory bank but slower inference; smaller = faster but may miss subtle defects |
+| `--threshold` (in app.py) | 0.55 | Demo decision threshold only; validate against your own data before any real use |
 
-```python
-!find data -maxdepth 4 -type d | head -80
-```
+## Limitations
 
-Then pass the correct parent directory to `--data-root`.
-
-### `No module named torch` or other missing package
-Run `pip install -r requirements.txt`, then restart the Colab session if imports still fail.
-
-### CUDA out-of-memory
-Try `--batch-size 8`, then `4`. Reduce image size to `224` or `192` if needed.
-
-### Very slow inference
-Nearest-neighbour distance grows with memory-bank size. Reduce `--max-memory-patches` to `6000` or `3000` when training, then retrain. This trades some detection detail for speed.
-
-### The heatmap is noisy or highlights the background
-This can happen due to changes in lighting, image alignment, or background. Use consistent product images, compare multiple examples, and document failures. Do not claim that every highlighted region is a true defect.
-
-### Everything appears anomalous
-The model is not using a universal calibrated threshold. Compare scores on known normal and defective test images; do not interpret the numeric score as a probability. Ensure the selected category matches the training data.
-
-### Model checkpoint does not exist
-Run the training command successfully first. It should create `outputs/model.pt`.
-
-## One-day schedule
-
-- 0:00–0:45 — obtain/extract dataset, install dependencies, check paths.
-- 0:45–2:00 — train on one category.
-- 2:00–3:00 — run evaluation and inspect outputs.
-- 3:00–4:00 — launch Gradio demo and test known images.
-- 4:00–6:00 — prepare screenshots, metrics, report, and viva explanation.
-- Remaining time — debug and add a second category only if the first works.
-
-## What to include in the college report
-
-1. Problem statement and industrial use case.
-2. Dataset description and license.
-3. Method: pretrained feature extraction, memory bank, nearest-neighbour patch scoring.
-4. Evaluation: image-level AUROC, pixel-level AUROC, and example heatmaps.
-5. Failure cases and limitations.
-6. Demo screenshots and future scope.
-
-## Important limitations
-
-- The model is specialized to the product category used in training.
-- A benchmark dataset is not the same as live factory camera data.
-- Anomaly score is not a calibrated probability.
-- The heatmap indicates unusual appearance, not a verified diagnosis of defect type.
-- Use a human review step; do not automatically reject products based on this prototype.
-- MVTec AD has its own license terms. Follow them.
+- The model is specialised to the product category it was trained on. A bottle model cannot inspect tiles.
+- Benchmark datasets (e.g. MVTec AD) do not fully represent real factory-camera conditions (lighting, alignment, background variation).
+- The anomaly score is not a calibrated probability. It measures dissimilarity from the training set, not a verified defect type.
+- The heatmap indicates regions that appear unusual relative to the normal training data; not every highlighted region corresponds to a true defect.
+- This is a research prototype. **Always include a human review step.** Do not use it as an autonomous quality-control decision system.
 
 ## References
 
-- MVTec AD: https://www.mvtec.com/research-teaching/datasets/mvtec-ad
-- PyTorch: https://pytorch.org/
-- Torchvision ResNet: https://pytorch.org/vision/stable/models/resnet.html
-- Gradio: https://www.gradio.app/
+- [MVTec AD](https://www.mvtec.com/research-teaching/datasets/mvtec-ad) — Bergmann et al., "MVTec AD — A Comprehensive Real-World Dataset for Unsupervised Anomaly Detection", CVPR 2019.
+- [PatchCore](https://github.com/amazon-science/patchcore-inspection) — Roth et al., "Towards Total Recall in Industrial Anomaly Detection", CVPR 2022.
+- [PyTorch](https://pytorch.org/)
+- [Torchvision ResNet](https://pytorch.org/vision/stable/models/resnet.html)
+- [Gradio](https://www.gradio.app/)
